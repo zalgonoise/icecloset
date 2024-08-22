@@ -21,13 +21,14 @@ func ExecSuspend(ctx context.Context, logger *slog.Logger, args []string) (int, 
 	fs := flag.NewFlagSet("resume", flag.ExitOnError)
 
 	procName := fs.String("name", "", "the name of the target process")
+	procID := fs.Int("pid", 0, "the process ID of the target process")
 	timeout := fs.Duration("timeout", defaultTimeout, "the amount of time to wait before releasing the process")
 
 	if err := fs.Parse(args); err != nil {
 		return 1, err
 	}
 
-	if *procName == "" {
+	if *procName == "" && *procID < 0 {
 		return 1, ErrTargetProcessRequired
 	}
 
@@ -38,15 +39,45 @@ func ExecSuspend(ctx context.Context, logger *slog.Logger, args []string) (int, 
 		defer cancel()
 	}
 
-	if err := Suspend(ctx, *procName, logger); err != nil {
+	if *procID > 0 {
+		if err := SuspendProcessByID(ctx, *procID); err != nil {
+			return 1, err
+		}
+
+		return 0, nil
+	}
+
+	if err := SuspendProcessByName(ctx, *procName, logger); err != nil {
 		return 1, err
 	}
 
 	return 0, nil
 }
 
-func Suspend(ctx context.Context, procName string, logger *slog.Logger) error {
-	h, err := proc.Load(ctx, procName, logger)
+func SuspendProcessByName(ctx context.Context, procName string, logger *slog.Logger) error {
+	h, err := proc.LoadProcessByName(ctx, procName, logger)
+	if err != nil {
+		return err
+	}
+
+	dll := windows.NewLazySystemDLL("ntdll.dll")
+
+	if _, _, err := dll.NewProc("NtSuspendProcess").Call(uintptr(h)); !isNilError(err) {
+		return fmt.Errorf("failed to call NtSuspendProcess: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		if _, _, err := dll.NewProc("NtResumeProcess").Call(uintptr(h)); !isNilError(err) {
+			return fmt.Errorf("failed to call NtResumeProcess: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func SuspendProcessByID(ctx context.Context, procID int) error {
+	h, err := proc.LoadProcessByID(procID)
 	if err != nil {
 		return err
 	}
