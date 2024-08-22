@@ -18,7 +18,7 @@ type perfData struct {
 	IDProcess float64 `perflib:"ID Process"`
 }
 
-func Load(ctx context.Context, procName string, logger *slog.Logger) (windows.Handle, error) {
+func LoadProcessByName(ctx context.Context, procName string, logger *slog.Logger) (windows.Handle, error) {
 	objs, err := perflib.GetPerflibSnapshot("")
 	if err != nil {
 		return 0, fmt.Errorf("failed to get perflib snapshot: %w", err)
@@ -43,4 +43,13 @@ func Load(ctx context.Context, procName string, logger *slog.Logger) (windows.Ha
 	}
 
 	return 0, ErrProcNotFound
+}
+
+func LoadProcessByID(procID int) (windows.Handle, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_SUSPEND_RESUME, false, uint32(procID))
+	if err != nil {
+		return 0, fmt.Errorf("failed to open process: %w", err)
+	}
+
+	return h, nil
 }
